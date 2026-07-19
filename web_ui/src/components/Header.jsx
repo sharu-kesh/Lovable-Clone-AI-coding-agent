@@ -22,8 +22,8 @@ export default function Header({ agentStatus, onCleanPort }) {
   return (
     <header className="app-header">
       <div className="logo-section">
-        <div className="logo-mark">AG</div>
-        <span className="logo-text">Antigravity</span>
+        <div className="logo-mark">L</div>
+        <span className="logo-text">Lovable</span>
         <span className="logo-badge">AI Agent</span>
       </div>
 
