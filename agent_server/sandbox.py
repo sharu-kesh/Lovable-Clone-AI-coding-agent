@@ -47,6 +47,8 @@ class SandboxManager:
         Uses subprocess.Popen and threads to be fully compatible with Windows SelectorEventLoop.
         """
         cwd = self.safe_resolve(cwd_relative)
+        # Ensure working directory exists before running process to prevent OS errors
+        os.makedirs(cwd, exist_ok=True)
         logger.info(f"Running command: '{command}' in '{cwd}' (background={is_background})")
 
         env = os.environ.copy()
@@ -100,7 +102,7 @@ class SandboxManager:
                         encoding="utf-8",
                         errors="replace"
                     )
-                    stdout, stderr = process.communicate(timeout=60)
+                    stdout, stderr = process.communicate(timeout=180)
                     return process.returncode or 0, stdout or "", stderr or ""
                 except subprocess.TimeoutExpired:
                     try:
@@ -116,7 +118,7 @@ class SandboxManager:
                     except:
                         pass
                     stdout, stderr = process.communicate()
-                    return -1, stdout or "", (stderr or "") + "\n❌ Process killed: Command exceeded the 60-second execution limit."
+                    return -1, stdout or "", (stderr or "") + "\n❌ Process killed: Command exceeded the 180-second execution limit."
                 except Exception as ex:
                     return -1, "", str(ex)
                     

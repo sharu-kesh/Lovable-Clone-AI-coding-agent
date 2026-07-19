@@ -72,6 +72,18 @@ If a terminal build command fails (`exit_code != 0`), the orchestrator captures 
    ```
 3. Open `agent_server/.env` and insert your API keys (e.g. `GEMINI_API_KEY`, `GROQ_API_KEY`). Set `LLM_PROVIDER` to your preferred primary model (default `gemini`).
 
+### GitHub Models for a free demo
+
+GitHub Models provides a free prototyping quota and supports the function calls this coding agent needs. Create a GitHub personal access token with the `models` permission, then add the following to `agent_server/.env`:
+
+```env
+GITHUB_TOKEN=github_pat_your_token_here
+LLM_PROVIDER=github
+LLM_MODEL=openai/gpt-4.1
+```
+
+Restart the backend and choose **GitHub Models → GPT-4.1 via GitHub** in the chat model picker. The free quota is intended for prototyping and is rate-limited, so keep another configured provider as a fallback for longer demos.
+
 ### 2. Start the Backend Server
 1. Navigate to the backend folder:
    ```bash

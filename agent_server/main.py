@@ -117,16 +117,16 @@ async def chat_endpoint(req: ChatRequest):
         return StreamingResponse(command_stream(), media_type="text/event-stream")
 
     # ── Plan Approval/Rejection via Chat Text ────────────────────────────────
-    is_plan_pending = session.status == "planning" or (
-        session.plan and 
-        len(session.history) > 0 and 
-        session.history[-1]["role"] == "assistant" and 
-        session.history[-1].get("content") is not None and
-        ("checklist" in session.history[-1]["content"].lower() or "plan" in session.history[-1]["content"].lower())
-    )
+    # The persisted state is the source of truth.  Looking for words such as
+    # "plan" in the last assistant message misclassified normal follow-up
+    # requests as plan feedback after an app had already been built.
+    is_plan_pending = session.status == "planning"
     if is_plan_pending:
         approval_keywords = {"implement", "proceed", "approve", "start", "go", "yes", "ok", "run", "do"}
-        msg_words = set(re.sub(r"[^a-z\s]", "", msg).split())
+        # Use the incoming chat text.  This used to reference an undefined
+        # variable named `msg`, which stopped the request before the coding
+        # stream could start when a user typed "implement".
+        msg_words = set(re.sub(r"[^a-z\s]", "", req.message.lower()).split())
         is_approval = any(kw in msg_words for kw in approval_keywords)
 
         if is_approval:
@@ -245,6 +245,11 @@ async def approve_plan_endpoint(req: PlanApprovalRequest):
         return StreamingResponse(regenerate_plan_stream(), media_type="text/event-stream")
 
     # User Approved: Trigger the agent execution loop
+    # Persist the transition immediately so a refresh (or a second request)
+    # cannot treat the already-approved plan as still awaiting approval.
+    session.status = "executing"
+    orchestrator.save_session_to_disk(req.session_id)
+
     async def execute_stream():
         try:
             async for step in orchestrator.execute_coding_step(

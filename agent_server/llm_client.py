@@ -75,9 +75,11 @@ class ModelSlot:
 # Each entry: (provider, model_id, priority, display_label)
 # priority: lower = tried sooner. Adjust freely.
 DEFAULT_MODEL_QUEUE = [
+    # GitHub Models - free prototyping quota and OpenAI-compatible tool calling
+    ("github",    "openai/gpt-4.1",     0,  "GitHub Models GPT-4.1"),
     # Gemini - generous free quota, fast
-    ("gemini",    "gemini-2.0-flash",    0,  "Gemini 2.0 Flash"),
-    ("gemini",    "gemini-flash-latest", 1,  "Gemini Flash Latest (2.5)"),
+    ("gemini",    "gemini-2.0-flash",    1,  "Gemini 2.0 Flash"),
+    ("gemini",    "gemini-flash-latest", 2,  "Gemini Flash Latest (2.5)"),
     # Groq - fastest inference, 30 RPM free tier
     ("groq",      "llama-3.3-70b-versatile", 2, "Groq Llama 3.3 70B"),
     ("groq",      "llama-3.1-8b-instant",     3, "Groq Llama 3.1 8B"),  # Replaced decommissioned mixtral-8x7b
@@ -106,6 +108,7 @@ class LLMClient:
             "groq":       os.getenv("GROQ_API_KEY",       "").strip(),
             "together":   os.getenv("TOGETHER_API_KEY",   "").strip(),
             "mistral":    os.getenv("MISTRAL_API_KEY",    "").strip(),
+            "github":     os.getenv("GITHUB_TOKEN",        "").strip(),
             "ollama":     "local",   # no key needed for Ollama
         }
 
@@ -188,6 +191,17 @@ class LLMClient:
             headers = {
                 "x-goog-api-key": key,
                 "Authorization":  f"Bearer {key}",
+            }
+
+        elif p == "github":
+            # GitHub Models exposes an OpenAI-compatible inference endpoint.
+            # A fine-grained PAT needs the "models" permission.
+            url = "https://models.github.ai/inference"
+            tgt_model = model or "openai/gpt-4.1"
+            headers = {
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {key}",
+                "X-GitHub-Api-Version": "2026-03-10",
             }
 
         elif p == "groq":
@@ -279,18 +293,23 @@ class LLMClient:
         """
         is_gemini = target_provider.lower() == "gemini"
         
-        # 1. Find the index of the latest user message
+        # 1. Find the active turn barrier index (whichever is greater: the latest user message, or the latest tool-calling assistant message)
         last_user_idx = -1
+        last_active_assistant_idx = -1
         for idx, m in enumerate(messages):
             if m.get("role") == "user":
                 last_user_idx = idx
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                last_active_assistant_idx = idx
+
+        active_barrier = max(last_user_idx, last_active_assistant_idx)
 
         cleaned = []
 
         # Collect IDs of all tool executions that actually returned responses in the active turn
         responded_ids = {
             m.get("tool_call_id") for idx, m in enumerate(messages)
-            if idx >= last_user_idx and m.get("role") == "tool" and m.get("tool_call_id")
+            if idx >= active_barrier and m.get("role") == "tool" and m.get("tool_call_id")
         }
 
         for idx, m in enumerate(messages):
@@ -299,13 +318,13 @@ class LLMClient:
             tool_calls = m.get("tool_calls")
             clean_m: Dict[str, Any] = {}
 
-            if idx < last_user_idx:
+            if idx < active_barrier:
                 # ── Flatten Historical Message ──
                 if role == "assistant" and tool_calls:
                     calls_text = []
                     for tc in tool_calls:
                         func = tc.get("function", {})
-                        calls_text.append(f"[Tool Call: {func.get('name')}({func.get('arguments')})]")
+                        calls_text.append(f"Action: called {func.get('name')} with arguments {func.get('arguments')}")
                     calls_str = "\n".join(calls_text)
                     content_str = content or ""
                     clean_m["role"] = "assistant"
@@ -313,7 +332,7 @@ class LLMClient:
                 elif role == "tool":
                     # Convert tool response into a user message to maintain clean history flow
                     clean_m["role"] = "user"
-                    clean_m["content"] = f"[Tool Result ({m.get('name') or 'tool_call'})]: {content or ''}"
+                    clean_m["content"] = f"Result of {m.get('name') or 'tool'}: {content or ''}"
                 else:
                     clean_m["role"] = role if role else "user"
                     clean_m["content"] = content if content is not None else ""
@@ -386,6 +405,7 @@ class LLMClient:
         messages:           List[Dict[str, Any]],
         tools:              Optional[List[Dict[str, Any]]] = None,
         tool_choice:        Optional[str]                  = None,
+        require_tool_call:  bool                           = False,
         response_format:    Optional[Dict[str, Any]]       = None,
         preferred_provider: Optional[str]                  = None,
         preferred_model:    Optional[str]                  = None,
@@ -465,10 +485,19 @@ class LLMClient:
 
                 # ── Success ───────────────────────────────────────────────────
                 if response.status_code == 200:
+                    data = response.json()
+                    message = (data.get("choices") or [{}])[0].get("message") or {}
+                    if require_tool_call and not message.get("tool_calls"):
+                        err_text = f"{slot.display} returned prose instead of a required tool call"
+                        logger.warning(f"[queue] {err_text}")
+                        last_errors.append(err_text)
+                        slot.on_error()
+                        self._save_cooldowns()
+                        continue
                     slot.on_success()
                     self._save_cooldowns()
                     logger.info(f"[queue] [OK] {slot.display} succeeded. Queue: {[s.display for s in self._sorted_queue()]}")
-                    return response.json()
+                    return data
 
                 err_text = f"{slot.display} status {response.status_code}: {response.text[:400]}"
                 logger.warning(f"[queue] {err_text}")

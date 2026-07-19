@@ -32,6 +32,12 @@ Follow these rules:
 5. After modifying files or running builds, make sure you start the dev server ('npm run dev') in the background to preview the changes.
 6. If a terminal command fails or a compiler error occurs, read the logs and correct your code.
 7. Explain what you are doing in short, user-facing status messages.
+
+This is an execution turn, not a design discussion. You MUST call the available
+workspace tools to do the work; never say that tools are unavailable, never only
+describe code in chat, and never ask the user to create files manually. Start by
+creating/scaffolding the project when it is new, then keep making tool calls until
+the requested app is implemented and runnable.
 """
 
 QUICK_CODE_SYSTEM_PROMPT = """You are a concise, expert coding assistant.
@@ -470,6 +476,8 @@ class Orchestrator:
         yield {"type": "status", "message": "Executing coding step..."}
         
         max_iterations = 15
+        tools_executed_this_turn = False
+        no_tool_retries = 0
         
         for _ in range(max_iterations):
             # ── Interrupt check — user pressed Stop ──────────────────────────
@@ -490,8 +498,10 @@ class Orchestrator:
             # Inject project subdirectory context so the agent scopes all work to it
             project_dir = session.project_dir or "my-app"
             project_path_hint = (
-                f"\n\nProject Directory: All files for this project MUST be created inside "
-                f"'sandbox/{project_dir}/'. When running terminal commands, always set "
+                f"\n\nProject directory: sandbox/{project_dir}/. All files for this project MUST be created inside this folder.\n"
+                f"Always use surgical diff edits (edit_file_diff) instead of writing whole files.\n"
+                f"Always configure the development preview server port to be 5174 (never 5173) in any config files (like vite.config.ts or vite.config.js) to avoid port conflicts with the main dashboard.\n"
+                f"When running terminal commands, always set "
                 f"cwd_relative to '{project_dir}' so commands execute inside that subfolder. "
                 f"Example: to scaffold, run: npm create vite@latest . -- --template react --overwrite "
                 f"with cwd_relative='{project_dir}'."
@@ -530,6 +540,10 @@ class Orchestrator:
                 response = await self.llm.chat_completion(
                     messages=messages,
                     tools=self.tools.get_tool_definitions(),
+                    # Before this turn has made any workspace change, a prose
+                    # response is not a valid implementation result. Let the
+                    # provider queue try the next tool-capable model instead.
+                    require_tool_call=not tools_executed_this_turn,
                     preferred_provider=provider,
                     preferred_model=model
                 )
@@ -540,6 +554,30 @@ class Orchestrator:
                 return
 
             msg = response["choices"][0]["message"]
+
+            # --- Text-based Tool Call Parser Guardrail ---
+            content = msg.get("content")
+            tool_calls = msg.get("tool_calls")
+            if not tool_calls and content and "[Tool Call:" in content:
+                import re
+                # Matches format: [Tool Call: function_name(arguments)]
+                match = re.search(r"\[Tool Call:\s*(\w+)\((.*?)\)\]", content, re.DOTALL)
+                if match:
+                    func_name = match.group(1)
+                    args_str = match.group(2).strip()
+                    logger.info(f"Parsed text-based tool call hallucination: {func_name}({args_str})")
+                    import uuid
+                    msg["tool_calls"] = [{
+                        "id": f"parsed-{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {
+                            "name": func_name,
+                            "arguments": args_str
+                        }
+                    }]
+                    # Clean up the text tool call tag from content so it doesn't leak into UI
+                    msg["content"] = content.replace(match.group(0), "").strip()
+
             session.history.append(msg)
             self.save_session_to_disk(session_id)
 
@@ -548,6 +586,30 @@ class Orchestrator:
 
             tool_calls = msg.get("tool_calls")
             if not tool_calls:
+                # A text-only response at this point means no code was changed.
+                # Give the model one explicit recovery turn instead of presenting
+                # a misleading successful completion to the user.
+                if not tools_executed_this_turn and no_tool_retries < 2:
+                    no_tool_retries += 1
+                    session.history.append({
+                        "role": "user",
+                        "content": (
+                            "You have not executed any workspace tool yet. Start implementation now: "
+                            "call execute_terminal_command to scaffold Vite or call write_file to create "
+                            "the first project file. Do not reply with an explanation."
+                        )
+                    })
+                    self.save_session_to_disk(session_id)
+                    yield {"type": "status", "message": "Starting workspace implementation..."}
+                    continue
+                if not tools_executed_this_turn:
+                    yield {
+                        "type": "error",
+                        "message": "The selected model returned text instead of using the workspace tools. Please try another configured coding model."
+                    }
+                    session.status = "idle"
+                    self.save_session_to_disk(session_id)
+                    return
                 yield {"type": "status", "message": "Coding step completed."}
                 session.status = "idle"
                 self.save_session_to_disk(session_id)
@@ -598,6 +660,7 @@ class Orchestrator:
 
                 # Run other tools (execute command, write file, read file) automatically
                 tool_output = await self._execute_tool(func_name, arguments, session_id)
+                tools_executed_this_turn = True
                 
                 compact_output = self._truncate_tool_output(func_name, tool_output)
 
