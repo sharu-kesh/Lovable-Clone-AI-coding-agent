@@ -1,0 +1,2 @@
+export interface Page { id: string; title: string; icon: string; cover: string; blocks: Block[]; parentId: string | null; isExpanded: boolean; isFavorite: boolean; }
+export interface Block { id: string; type: string; content: string; properties: { [key: string]: any }; }

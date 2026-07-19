@@ -1,0 +1,38 @@
+# --- Node / Frontend Caches ---
+node_modules/
+.npm
+.eslintcache
+web_ui/dist/
+web_ui/node_modules/
+
+# --- Python Caches & Environments ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Environment & Key Files ---
+.env
+.env*.local
+agent_server/.env
+
+# --- Local Databases & Sessions Caches ---
+agent_server/.sessions/cooldowns.json
+
+# --- Sandboxed Generated Projects Caches ---
+sandbox/*/node_modules/
+sandbox/*/dist/
+sandbox/*/package-lock.json
+
+# --- OS Caches & Logs ---
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.pdf
