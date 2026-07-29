@@ -58,6 +58,7 @@ const SLASH_COMMANDS = [
 // ─── Model List Registry ───────────────────────────────────────────────────────
 
 const PROVIDER_COLORS = {
+  github: '#f5f5f5',
   gemini: '#818cf8',
   groq: '#f472b6',
   together: '#fbbf24',
@@ -68,6 +69,13 @@ const PROVIDER_COLORS = {
 };
 
 const MODELS_REGISTRY = [
+  {
+    group: 'GitHub Models (Free demo tier)',
+    provider: 'github',
+    items: [
+      { id: 'openai/gpt-4.1', name: 'GPT-4.1 via GitHub', desc: 'Tool calling; free prototyping quota' },
+    ]
+  },
   {
     group: 'Gemini (Recommended)',
     provider: 'gemini',

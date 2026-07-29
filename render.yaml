@@ -1,0 +1,34 @@
+# render.yaml — Render deployment config for the LLM Proxy
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: lovable-clone-proxy
+    runtime: python
+    region: oregon           # Free tier region
+    plan: free
+    rootDir: llm_proxy
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+
+    # ─────────────────────────────────────────────────────────────
+    # IMPORTANT: Add your actual API key values in Render's
+    # "Environment" dashboard tab — do NOT put real values here.
+    # Only the variable NAMES are defined here.
+    # ─────────────────────────────────────────────────────────────
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false          # means: set manually in Render dashboard
+      - key: GROQ_API_KEY
+        sync: false
+      - key: TOGETHER_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false

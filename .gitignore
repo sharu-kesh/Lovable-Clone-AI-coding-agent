@@ -25,10 +25,12 @@ agent_server/.env
 # --- Local Databases & Sessions Caches ---
 agent_server/.sessions/cooldowns.json
 
-# --- Sandboxed Generated Projects Caches ---
-sandbox/*/node_modules/
-sandbox/*/dist/
-sandbox/*/package-lock.json
+# --- Sandbox: ALL generated project files are excluded from git ---
+# Users' projects are stored locally only, never pushed to GitHub.
+# The sandbox/ folder itself is tracked (via the .gitkeep below),
+# but every subfolder and its contents are excluded.
+sandbox/*
+!sandbox/.gitkeep
 
 # --- OS Caches & Logs ---
 .DS_Store

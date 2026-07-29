@@ -75,33 +75,43 @@ class ModelSlot:
 # Each entry: (provider, model_id, priority, display_label)
 # priority: lower = tried sooner. Adjust freely.
 DEFAULT_MODEL_QUEUE = [
+    # ── Cloud Proxy (highest priority when PROXY_URL is configured) ───────────
+    # Routes all LLM calls through your Render gateway; hides your API keys.
+    ("proxy",     "gemini-2.0-flash",    0,  "Cloud Proxy (Gemini 2.0 Flash)"),
+    # ── Direct provider fallbacks (used only when PROXY_URL is not set) ──────
     # GitHub Models - free prototyping quota and OpenAI-compatible tool calling
-    ("github",    "openai/gpt-4.1",     0,  "GitHub Models GPT-4.1"),
+    ("github",    "openai/gpt-4.1",     1,  "GitHub Models GPT-4.1"),
     # Gemini - generous free quota, fast
-    ("gemini",    "gemini-2.0-flash",    1,  "Gemini 2.0 Flash"),
-    ("gemini",    "gemini-flash-latest", 2,  "Gemini Flash Latest (2.5)"),
+    ("gemini",    "gemini-2.0-flash",    2,  "Gemini 2.0 Flash"),
+    ("gemini",    "gemini-flash-latest", 3,  "Gemini Flash Latest (2.5)"),
     # Groq - fastest inference, 30 RPM free tier
-    ("groq",      "llama-3.3-70b-versatile", 2, "Groq Llama 3.3 70B"),
-    ("groq",      "llama-3.1-8b-instant",     3, "Groq Llama 3.1 8B"),  # Replaced decommissioned mixtral-8x7b
+    ("groq",      "llama-3.3-70b-versatile", 4, "Groq Llama 3.3 70B"),
+    ("groq",      "llama-3.1-8b-instant",     5, "Groq Llama 3.1 8B"),
     # Together AI - open-source, large free credits
-    ("together",  "meta-llama/Llama-4-Scout-17B-16E-Instruct", 4, "Together Llama 4 Scout"),
-    ("together",  "Qwen/Qwen2.5-Coder-32B-Instruct",           5, "Together Qwen 2.5 Coder"),
+    ("together",  "meta-llama/Llama-4-Scout-17B-16E-Instruct", 6, "Together Llama 4 Scout"),
+    ("together",  "Qwen/Qwen2.5-Coder-32B-Instruct",           7, "Together Qwen 2.5 Coder"),
     # Mistral - strong coding models
-    ("mistral",   "codestral-latest",        6, "Mistral Codestral"),
-    ("mistral",   "mistral-medium-latest",   7, "Mistral Medium"),
+    ("mistral",   "codestral-latest",        8, "Mistral Codestral"),
+    ("mistral",   "mistral-medium-latest",   9, "Mistral Medium"),
     # OpenRouter - aggregator, wide model choice
-    ("openrouter", None,                     8, "OpenRouter (auto)"),
+    ("openrouter", None,                    10, "OpenRouter (auto)"),
     # OpenAI - last resort (costs money)
-    ("openai",    "gpt-4o-mini",             9, "OpenAI GPT-4o Mini"),
+    ("openai",    "gpt-4o-mini",            11, "OpenAI GPT-4o Mini"),
 ]
 
 
 class LLMClient:
     def __init__(self):
-        self.default_provider = os.getenv("LLM_PROVIDER", "gemini").lower()
+        # If PROXY_URL is set, all LLM calls go through the cloud gateway.
+        # Otherwise fall back to direct provider keys.
+        self.proxy_url = os.getenv("PROXY_URL", "").strip().rstrip("/")
+
+        self.default_provider = "proxy" if self.proxy_url else os.getenv("LLM_PROVIDER", "gemini").lower()
         self.default_model    = os.getenv("LLM_MODEL", "gemini-2.0-flash")
 
         self.keys = {
+            # proxy — treated as a key so _has_key() returns True when PROXY_URL is set
+            "proxy":      self.proxy_url,
             "gemini":     os.getenv("GEMINI_API_KEY",     "").strip(),
             "openrouter": os.getenv("OPENROUTER_API_KEY", "").strip(),
             "openai":     os.getenv("OPENAI_API_KEY",     "").strip(),
@@ -111,6 +121,9 @@ class LLMClient:
             "github":     os.getenv("GITHUB_TOKEN",        "").strip(),
             "ollama":     "local",   # no key needed for Ollama
         }
+
+        if self.proxy_url:
+            logger.info(f"[proxy] Cloud proxy mode enabled → {self.proxy_url}")
 
         # ── Global circuit-breaker queue ──────────────────────────────────────
         # Built at startup from DEFAULT_MODEL_QUEUE, filtered to only providers
@@ -182,7 +195,15 @@ class LLMClient:
         p = provider.lower()
         key = self.keys.get(p, "")
 
-        if p == "gemini":
+        if p == "proxy":
+            # Route through the cloud gateway on Render.
+            # The proxy URL is the full base URL; we append /proxy/completions in chat_completion.
+            url = self.proxy_url
+            tgt_model = model or "gemini-2.0-flash"
+            headers = {"Content-Type": "application/json"}
+            return url, tgt_model, headers
+
+        elif p == "gemini":
             url = "https://generativelanguage.googleapis.com/v1beta/openai"
             # Normalise legacy model names
             if model in ("gemini-1.5-flash", "gemini-3.5-flash", "gemini-2.5-flash-lite"):
@@ -465,7 +486,12 @@ class LLMClient:
 
             try:
                 base_url, tgt_model, headers = self._get_provider_config(slot.provider, slot.model)
-                url = f"{base_url}/chat/completions"
+
+                # Proxy uses a different endpoint path and needs the provider name in the body
+                if slot.provider == "proxy":
+                    url = f"{base_url}/proxy/completions"
+                else:
+                    url = f"{base_url}/chat/completions"
                 logger.info(f"[queue] Trying {slot.display} ({tgt_model})")
 
                 payload: Dict[str, Any] = {
@@ -473,6 +499,9 @@ class LLMClient:
                     "messages":    cleaned,
                     "temperature": 0.2,
                 }
+                if slot.provider == "proxy":
+                    # Tell the cloud proxy which upstream provider to use
+                    payload["provider"] = "gemini"
                 if tools:
                     payload["tools"] = [{"type": "function", "function": t} for t in tools]
                 if tool_choice:

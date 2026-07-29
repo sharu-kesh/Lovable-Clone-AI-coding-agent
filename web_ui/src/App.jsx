@@ -7,7 +7,11 @@ import PreviewTabs from './components/PreviewTabs';
 import DiffModal from './components/DiffModal';
 import DownloadModal from './components/DownloadModal';
 
-const API_BASE = 'http://localhost:8000';
+// API_BASE points to the local agent server the user runs on their own machine.
+// Vercel deployment: set VITE_API_BASE=http://localhost:8000 in Vercel env vars.
+// Local dev: works automatically without any env var.
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+
 
 export default function App() {
   // Session States
