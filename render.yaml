@@ -16,15 +16,24 @@ services:
     healthCheckPath: /api/health
 
     envVars:
-      # Routes LLM calls through the proxy service below (keeps keys in one place)
-      - key: PROXY_URL
-        value: https://lovable-clone-ai-coding-agent.onrender.com
       # Sandbox folder — use /tmp on Render's ephemeral filesystem
       - key: SANDBOX_PATH
         value: /tmp/lovable-sandbox
       # Sessions folder for persisting cooldowns
       - key: SESSIONS_PATH
         value: /tmp/lovable-sessions
+      # ─────────────────────────────────────────────────────────────
+      # Add your actual API key values in Render's Environment dashboard.
+      # At minimum set GEMINI_API_KEY. Others are optional fallbacks.
+      # ─────────────────────────────────────────────────────────────
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: TOGETHER_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
 
   # ── Service 2: LLM Proxy (holds API keys securely) ────────────────────────
   # Thin gateway that injects real API keys and forwards to Gemini/Groq/etc.
