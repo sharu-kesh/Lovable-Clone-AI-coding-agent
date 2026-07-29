@@ -42,13 +42,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize singletons
-# Projects are scaffolded inside a root 'sandbox' folder
+# SANDBOX_PATH: where generated projects are stored.
+# On Render: set SANDBOX_PATH=/tmp/lovable-sandbox via env var.
+# Locally:   defaults to ../sandbox next to agent_server/.
 base_dir = os.path.dirname(os.path.abspath(__file__))
-SANDBOX_PATH = os.path.abspath(os.path.join(base_dir, "..", "sandbox"))
+default_sandbox = os.path.abspath(os.path.join(base_dir, "..", "sandbox"))
+SANDBOX_PATH = os.getenv("SANDBOX_PATH", default_sandbox)
+os.makedirs(SANDBOX_PATH, exist_ok=True)
+
+# SESSIONS_PATH: where session JSON files and cooldowns are stored.
+# On Render: /tmp/lovable-sessions (ephemeral but fine for free tier).
+# Locally:   defaults to agent_server/.sessions
+default_sessions = os.path.join(base_dir, ".sessions")
+SESSIONS_PATH = os.getenv("SESSIONS_PATH", default_sessions)
+os.makedirs(SESSIONS_PATH, exist_ok=True)
+
 sandbox_mgr = SandboxManager(SANDBOX_PATH)
-llm_client = LLMClient()
-orchestrator = Orchestrator(sandbox_mgr, llm_client)
+llm_client = LLMClient(sessions_dir=SESSIONS_PATH)
+orchestrator = Orchestrator(sandbox_mgr, llm_client, sessions_dir=SESSIONS_PATH)
 
 # Pydantic models for request bodies
 class ChatRequest(BaseModel):
@@ -82,7 +93,20 @@ class DiffApprovalRequest(BaseModel):
 
 # --- API Endpoints ---
 
+@app.get("/api/health")
+def health_check():
+    """Render health check endpoint — confirms the agent server is running."""
+    return {
+        "status": "ok",
+        "service": "Lovable Clone Agent Server",
+        "sandbox_path": SANDBOX_PATH,
+        "proxy_mode": bool(llm_client.proxy_url),
+        "models_active": len([s for s in llm_client.model_queue if s.is_available()]),
+    }
+
+
 @app.get("/api/queue-status")
+
 def queue_status_endpoint():
     """
     Returns the live state of the global LLM circuit-breaker queue.

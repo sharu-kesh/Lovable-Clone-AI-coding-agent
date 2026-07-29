@@ -1,25 +1,47 @@
-# render.yaml — Render deployment config for the LLM Proxy
+# render.yaml — Render deployment config for both services
 # Docs: https://render.com/docs/blueprint-spec
 
 services:
+  # ── Service 1: Full Agent Server (the brain) ──────────────────────────────
+  # This handles all user requests, manages sandboxed projects, runs terminal
+  # commands, reads/writes files, and orchestrates the multi-agent loop.
+  - type: web
+    name: lovable-clone-agent
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: agent_server
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+
+    envVars:
+      # Routes LLM calls through the proxy service below (keeps keys in one place)
+      - key: PROXY_URL
+        value: https://lovable-clone-ai-coding-agent.onrender.com
+      # Sandbox folder — use /tmp on Render's ephemeral filesystem
+      - key: SANDBOX_PATH
+        value: /tmp/lovable-sandbox
+      # Sessions folder for persisting cooldowns
+      - key: SESSIONS_PATH
+        value: /tmp/lovable-sessions
+
+  # ── Service 2: LLM Proxy (holds API keys securely) ────────────────────────
+  # Thin gateway that injects real API keys and forwards to Gemini/Groq/etc.
+  # Add your actual API key values in Render's Environment dashboard.
   - type: web
     name: lovable-clone-proxy
     runtime: python
-    region: oregon           # Free tier region
+    region: oregon
     plan: free
     rootDir: llm_proxy
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
 
-    # ─────────────────────────────────────────────────────────────
-    # IMPORTANT: Add your actual API key values in Render's
-    # "Environment" dashboard tab — do NOT put real values here.
-    # Only the variable NAMES are defined here.
-    # ─────────────────────────────────────────────────────────────
     envVars:
       - key: GEMINI_API_KEY
-        sync: false          # means: set manually in Render dashboard
+        sync: false
       - key: GROQ_API_KEY
         sync: false
       - key: TOGETHER_API_KEY

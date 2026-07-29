@@ -101,10 +101,12 @@ DEFAULT_MODEL_QUEUE = [
 
 
 class LLMClient:
-    def __init__(self):
+    def __init__(self, sessions_dir: str = ".sessions"):
         # If PROXY_URL is set, all LLM calls go through the cloud gateway.
         # Otherwise fall back to direct provider keys.
         self.proxy_url = os.getenv("PROXY_URL", "").strip().rstrip("/")
+        self.sessions_dir = os.path.abspath(sessions_dir)
+        os.makedirs(self.sessions_dir, exist_ok=True)
 
         self.default_provider = "proxy" if self.proxy_url else os.getenv("LLM_PROVIDER", "gemini").lower()
         self.default_model    = os.getenv("LLM_MODEL", "gemini-2.0-flash")
@@ -151,15 +153,15 @@ class LLMClient:
                     # Save slot by provider:model key with its absolute available_at timestamp
                     cooldowns[f"{s.provider}:{s.model or ''}"] = s.available_at
             
-            os.makedirs(".sessions", exist_ok=True)
-            with open(".sessions/cooldowns.json", "w", encoding="utf-8") as f:
+            os.makedirs(self.sessions_dir, exist_ok=True)
+            with open(os.path.join(self.sessions_dir, "cooldowns.json"), "w", encoding="utf-8") as f:
                 json.dump(cooldowns, f)
         except Exception as e:
             logger.warning(f"Could not save model cooldowns: {e}")
 
     def _load_cooldowns(self):
         try:
-            path = ".sessions/cooldowns.json"
+            path = os.path.join(self.sessions_dir, "cooldowns.json")
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     cooldowns = json.load(f)
